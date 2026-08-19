@@ -123,6 +123,26 @@ describe('translate: tool calls', () => {
     ])
   })
 
+  it('does not let a null-name continuation delta clobber the opening name (live DeepSeek shape)', async () => {
+    // The live provider sends the opening delta with `function.name`, then a
+    // continuation delta carrying only `arguments` where name/id are explicit
+    // `null`. A `!== undefined` guard treated `null` as a real value and
+    // overwrote the opening name with `null`, surfacing as `unknown tool ""`.
+    const chunks = await collect(translate(feed(
+      firstChunk,
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_00_x', type: 'function', function: { name: 'bash', arguments: '' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: null, type: null, function: { name: null, arguments: '{"command": "ls"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      DONE,
+    )))
+    const ends = chunks.filter(chunk => chunk.type === 'block-end')
+    expect(ends).toEqual([{
+      type: 'block-end',
+      index: 0,
+      block: { type: 'tool-call', id: 'call_00_x', name: 'bash', arguments: '{"command": "ls"}' },
+    }])
+  })
+
   it('disambiguates parallel tool calls by wire index', async () => {
     const chunks = await collect(translate(feed(
       firstChunk,

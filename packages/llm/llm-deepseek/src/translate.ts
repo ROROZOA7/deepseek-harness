@@ -156,8 +156,12 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
           toolBlocks.set(call.index, block)
           yield { type: 'block-start', index: block.index, blockType: 'tool-call' }
         }
-        if (call.id !== undefined) block.callId = call.id
-        if (call.function?.name !== undefined) block.name = call.function.name
+        // Only override an already-open block's identity when this delta
+        // actually provides it: continuous tool-call deltas from some
+        // providers carry `function.name`/`id` as explicit `null` (not
+        // absent), which must not clobber the opening delta's value.
+        if (call.id != null) block.callId = call.id
+        if (call.function?.name != null) block.name = call.function.name
         const fragment = call.function?.arguments ?? ''
         block.text += fragment
         yield {
