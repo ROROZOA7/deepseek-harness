@@ -13,8 +13,12 @@ Status: implemented
 `packages/llm/llm-deepseek/src/translate.ts` 对工具调用的身份判空使用 `!== undefined`：
 
 ```ts
-if (call.id !== undefined) block.callId = call.id
-if (call.function?.name !== undefined) block.name = call.function.name
+export function preFix() {
+  const call: { id?: string | null; function?: { name?: string | null } } = { id: 'c', function: { name: 'bash' } }
+  const block: { callId?: string | null; name?: string | null } = {}
+  if (call.id !== undefined) block.callId = call.id
+  if (call.function?.name !== undefined) block.name = call.function.name
+}
 ```
 
 某些提供方会把一次工具调用流式输出为：起始增量携带 `function.name` 与 `id`，后续增量只携带 `arguments`，且身份字段以显式 `null`（而非缺省）出现。由于 `null !== undefined` 为 `true`，这样的后续增量会用 `null` 覆盖已打开块的合法工具名，最终工具调用块以 `name: ''` 收尾——派发时即报 `unknown tool ""`，对外表现为 `UNKNOWN_TOOL`。工具名已经注册、模型也已输出，是流式解析把它剥掉了。
@@ -22,8 +26,12 @@ if (call.function?.name !== undefined) block.name = call.function.name
 现在守卫只在字段确为有效值时才覆盖：
 
 ```ts
-if (call.id != null) block.callId = call.id
-if (call.function?.name != null) block.name = call.function.name
+export function postFix() {
+  const call: { id?: string | null; function?: { name?: string | null } } = { id: null, function: { name: null } }
+  const block: { callId?: string | null; name?: string | null } = {}
+  if (call.id != null) block.callId = call.id
+  if (call.function?.name != null) block.name = call.function.name
+}
 ```
 
 携带 `null` 名/id 的后续增量不再覆盖起始增量的值，而完全省略这些字段的增量（既有的宽松 wire 场景）行为与之前完全一致。

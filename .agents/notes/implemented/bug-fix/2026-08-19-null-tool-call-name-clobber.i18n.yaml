@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-19-null-tool-call-name-clobber.md
-2026-08-19-null-tool-call-name-clobber.md: 08b1f3bab904cd92dd5143d1a698afcdce2c0399
-2026-08-19-null-tool-call-name-clobber.zh.md: efd5e11fd53b9de4ab53dd6a476cea1ba41797ff
+2026-08-19-null-tool-call-name-clobber.md: 93121750dacb1de6ce000f1c3903b22fa4fe9161
+2026-08-19-null-tool-call-name-clobber.zh.md: ffcd133a59a42e422c8289dcf9584e991fb224f7
