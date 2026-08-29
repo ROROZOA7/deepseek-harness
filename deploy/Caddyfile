@@ -1,0 +1,18 @@
+ # DeepSeek Harness front door on port 8080 and Lavish AXI on the published port.
+ # Both services share dsh's network namespace; Caddy forwards to Lavish's
+ # configured listener while Docker publishes Caddy's 8443 port externally.
+ :8080 {
+  basic_auth {
+    {$CADDY_NAME} {$CADDY_PASSWORD_HASH}
+  }
+  reverse_proxy 127.0.0.1:3080
+ }
+
+ :8443 {
+  basic_auth {
+    {$CADDY_NAME} {$CADDY_PASSWORD_HASH}
+  }
+  reverse_proxy 127.0.0.1:{$LAVISH_HTTP_PORT} {
+    header_up Host {$LAVISH_PUBLIC_HOST}:{$LAVISH_HTTP_PORT}
+  }
+ }

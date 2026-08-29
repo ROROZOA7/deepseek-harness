@@ -1,0 +1,32 @@
+# Use OpenCode Go's OpenAI-compatible endpoint instead of the native DeepSeek API.
+# The API key is resolved from the container environment at request time.
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  config:
+    providers:
+      opencode-go:
+        displayName: OpenCode Go
+        apiKeyEnv: OPENCODE_GO_API_KEY
+        api: openai-completions
+        baseURL: https://opencode.ai/zen/go/v1
+        models:
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 128000
+            maxTokens: 32768
+            reasoningEfforts:
+              off:
+              low: low
+              medium: medium
+              high: high
+              max: max
+            compat:
+              thinkingFormat: openai
+              supportsReasoningEffort: true
+
+- id: agent-default-model
+  config:
+    provider: opencode-go
+    model: deepseek-v4-flash

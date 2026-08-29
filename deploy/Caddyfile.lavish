@@ -1,0 +1,8 @@
+:8443 {
+  basic_auth {
+    team {$CADDY_PASSWORD_HASH}
+  }
+  reverse_proxy 127.0.0.1:{$LAVISH_HTTP_PORT} {
+    header_up Host {$LAVISH_PUBLIC_HOST}:{$LAVISH_HTTP_PORT}
+  }
+}

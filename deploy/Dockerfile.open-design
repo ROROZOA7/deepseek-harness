@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+ARG OPEN_DESIGN_REF=open-design-v0.21.0
+
+FROM node:24-bookworm AS open-design-build
+ARG OPEN_DESIGN_REF
+ENV CI=true NODE_OPTIONS=--max-old-space-size=4096
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar python3 make g++ && rm -rf /var/lib/apt/lists/* && corepack enable && corepack prepare pnpm@10.33.2 --activate
+WORKDIR /src
+RUN mkdir open-design && curl -fL --retry 5 --retry-all-errors --connect-timeout 30 "https://github.com/nexu-io/open-design/archive/refs/tags/${OPEN_DESIGN_REF}.tar.gz" | tar -xzf - --strip-components=1 -C open-design
+WORKDIR /src/open-design
+RUN pnpm install --frozen-lockfile && pnpm --filter @open-design/daemon build && pnpm --filter @open-design/web build && pnpm --filter @open-design/dsh-runtime build && mkdir -p /out/profile && pnpm -C packages/dsh-runtime pack --pack-destination /out/profile && pnpm --filter @open-design/daemon deploy --legacy --prod /out/daemon
+RUN mkdir -p /out/assets && cp -a apps/web/out /out/web && cp -a skills /out/skills && cp -a design-systems /out/design-systems && cp -a craft /out/craft && cp -a prompt-templates /out/prompt-templates && cp -a assets/frames /out/assets/frames && cp -a assets/community-pets /out/assets/community-pets && cp -a plugins/_official /out/plugins-official
+
+FROM dsh-team-harness:local
+USER root
+COPY --from=open-design-build /out/daemon /opt/open-design/apps/daemon
+COPY --from=open-design-build /out/web /opt/open-design/apps/web/out
+COPY --from=open-design-build /out/skills /opt/open-design/skills
+COPY --from=open-design-build /out/design-systems /opt/open-design/design-systems
+COPY --from=open-design-build /out/craft /opt/open-design/craft
+COPY --from=open-design-build /out/prompt-templates /opt/open-design/prompt-templates
+COPY --from=open-design-build /out/assets /opt/open-design/assets
+COPY --from=open-design-build /out/plugins-official /opt/open-design/plugins/_official
+COPY --from=open-design-build /out/profile /opt/open-design-profile
+ENV DSH_HOME=/opt/open-design-home OD_BIND_HOST=0.0.0.0 OD_PORT=7456
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate \
+ && mkdir -p /app/vendor /opt/open-design-home /data/od /workspaces /opt/open-design/.od \
+ && ln -s /app/node_modules/.pnpm/node_modules /app/vendor/node_modules \
+ && printf '%s\n' '#!/bin/sh' 'exec node --expose-internals /app/apps/cli/lib/bin.js "$@"' > /usr/local/bin/dsh \
+ && chmod 755 /usr/local/bin/dsh \
+ && dsh plugin --profile open-design add /opt/open-design-profile/*.tgz \
+ && mkdir -p /app/vendor/node_modules/@open-design \
+ && ln -sfn /opt/open-design-home/profiles/open-design/node_modules/@open-design/dsh-runtime /app/vendor/node_modules/@open-design/dsh-runtime \
+ && dsh --profile open-design --probe \
+ && chown -R node:node /data /opt/open-design-home /workspaces /opt/open-design /opt/open-design-profile
+WORKDIR /opt/open-design
+USER node
+ENTRYPOINT ["node", "apps/daemon/dist/cli.js"]
+CMD ["--no-open"]

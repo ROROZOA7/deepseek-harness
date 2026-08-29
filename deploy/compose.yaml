@@ -1,0 +1,189 @@
+name: dsh-team
+
+services:
+  dsh:
+    image: dsh-team-harness:local
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        DSH_CLIENT_COMMIT_HASH: ${DSH_CLIENT_COMMIT_HASH:-0000000000000000000000000000000000000000}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?set OPENCODE_GO_API_KEY in deploy/.env}
+      DSH_ALLOW_REMOTE_CONFIGURATION: ${DSH_ALLOW_REMOTE_CONFIGURATION:-1}
+      # The host cannot reliably reach GitHub Pages or npmjs.org; keep both
+      # the market catalog and pnpm on reachable public mirrors.
+      DSHM_REGISTRY_URL: ${DSHM_REGISTRY_URL:?set DSHM_REGISTRY_URL in deploy/.env}
+      DSHM_NPM_MIRROR: ${DSHM_NPM_MIRROR:-https://registry.npmmirror.com}
+      npm_config_registry: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      # Lavish runs in the shared dsh network namespace. Use the published
+      # port here so agent commands reach the same listener and receive links
+      # that work from the host browser.
+      LAVISH_AXI_PORT: ${LAVISH_HTTP_PORT:-4387}
+    volumes:
+      - dsh-data:/data/dsh
+      - lavish-data:/data/lavish
+      - ./workspaces:/workspaces
+    command:
+      - web
+      - --patch
+      - /app/deploy/cordis.patch.yml
+      - --trusted-host
+      - ${DSH_PUBLIC_HOST:-dsh.localhost}
+      - ${DSH_PUBLIC_HOST:-dsh.localhost}:${DSH_HTTP_PORT:-8080}
+    ports:
+      - "127.0.0.1:${DSH_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${LAVISH_HTTP_PORT:-4387}:8443"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3080').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  lavish:
+    image: dsh-team-harness:local
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    network_mode: "service:dsh"
+    depends_on:
+      dsh:
+        condition: service_started
+    environment:
+      LAVISH_AXI_HOST: 127.0.0.1
+      LAVISH_AXI_PORT: ${LAVISH_HTTP_PORT:-4387}
+      LAVISH_AXI_LINK_HOST: ${LAVISH_PUBLIC_HOST:-lavish.localhost}
+      LAVISH_AXI_ALLOWED_HOSTS: ${LAVISH_PUBLIC_HOST:-lavish.localhost} ${LAVISH_PUBLIC_HOST:-lavish.localhost}:${LAVISH_HTTP_PORT:-4387}
+      LAVISH_AXI_STATE_DIR: /data/lavish
+      LAVISH_AXI_IDLE_TIMEOUT_MS: "0"
+    volumes:
+      - lavish-data:/data/lavish
+      - ./workspaces:/workspaces
+    entrypoint: ["lavish-axi"]
+    command: ["server", "--port", "${LAVISH_HTTP_PORT:-4387}"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:${LAVISH_HTTP_PORT:-4387}/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # ghcr.io/nexu-io/od:latest needs a derived image containing dsh and the
+  # OpenDesign profile before DeepSeek Harness can be selected.
+  open-design:
+    image: ${OPEN_DESIGN_IMAGE:-dsh-team-open-design:local}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.open-design
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: ${OPEN_DESIGN_NODE_OPTIONS:---max-old-space-size=192}
+      # Keep the browser UI on the published host port while the daemon keeps
+      # its internal 7456 listener for preview isolation.
+      OD_BIND_HOST: 0.0.0.0
+      OD_DATA_DIR: /data/od
+      OD_PORT: 7456
+      OD_WEB_PORT: ${OPEN_DESIGN_PORT:-7457}
+      OD_ALLOWED_ORIGINS: ${OD_ALLOWED_ORIGINS:?set OD_ALLOWED_ORIGINS in deploy/.env}
+      OD_API_TOKEN: ${OD_API_TOKEN:?set OD_API_TOKEN in deploy/.env}
+      DSH_HOME: /opt/open-design-home
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?set OPENCODE_GO_API_KEY in deploy/.env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    volumes:
+      - open-design-data:/data/od
+      - open-design-dsh:/opt/open-design-home
+      - ./cordis.patch.yml:/opt/open-design-home/profiles/open-design/cordis.patch.yml:ro
+      - ./workspaces:/workspaces
+    ports:
+      - "127.0.0.1:${OPEN_DESIGN_PORT:-7457}:7456"
+    tmpfs:
+      - /tmp
+    mem_limit: ${OPEN_DESIGN_MEM_LIMIT:-384m}
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7456/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    network_mode: "service:dsh"
+    depends_on:
+      dsh:
+        condition: service_healthy
+      lavish:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The stock caddy binary carries cap_net_bind_service as a file
+    # capability; exec fails EPERM unless that one cap stays grantable.
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      CADDY_NAME: ${CADDY_NAME:?set CADDY_NAME in deploy/.env}
+      CADDY_PASSWORD_HASH: ${CADDY_PASSWORD_HASH:?set CADDY_PASSWORD_HASH in deploy/.env}
+      LAVISH_PUBLIC_HOST: ${LAVISH_PUBLIC_HOST:-lavish.localhost}
+      LAVISH_HTTP_PORT: ${LAVISH_HTTP_PORT:-4387}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      dsh:
+        condition: service_healthy
+      lavish:
+        condition: service_healthy
+      open-design:
+        condition: service_healthy
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in deploy/.env}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  dsh-data:
+  lavish-data:
+  caddy-data:
+  open-design-dsh:
+  open-design-data:
